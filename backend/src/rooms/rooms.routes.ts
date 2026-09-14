@@ -1,6 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
-import { createRoom, getRoomInfo, requestToJoin, approveRequest, getMessages } from "./rooms.service";
+import {
+  createRoom,
+  getRoomInfo,
+  requestToJoin,
+  approveRequest,
+  getMessages,
+  getPendingRequests,
+  getRequestStatus,
+} from "./rooms.service";
 import { signToken } from "../auth/token";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { redisCommand } from "../redis/client";
@@ -11,7 +19,7 @@ export const roomsRouter = Router();
 const createRoomSchema = z.object({
   roomName: z.string().min(1).max(80),
   adminName: z.string().min(1).max(40),
-  ttlSeconds: z.number().int().min(60).max(7200), // 1 min to 2 hours
+  ttlSeconds: z.number().int().min(60).max(7200),
   warningLeadSeconds: z.number().int().min(5).max(600).optional(),
 });
 
@@ -68,6 +76,32 @@ roomsRouter.post("/rooms/:roomId/requests", async (req, res) => {
   } catch (err) {
     res.status(404).json({ error: (err as Error).message });
   }
+});
+
+roomsRouter.get(
+  "/rooms/:roomId/requests",
+  requireAuth("admin"),
+  async (req: AuthedRequest, res) => {
+    const { roomId } = roomParamsSchema.parse(req.params);
+    const requests = await getPendingRequests(roomId);
+    res.json(requests);
+  }
+);
+
+// No auth required — the visitor doesn't have a token yet. Safe because
+// requestId is an unguessable server-generated UUID, and this route only
+// ever hands back a token scoped to that exact requestId.
+roomsRouter.get("/rooms/:roomId/requests/:requestId/status", async (req, res) => {
+  const { roomId, requestId } = approveParamsSchema.parse(req.params);
+  const status = await getRequestStatus(roomId, requestId);
+
+  if (status === "approved") {
+    const ttl = await redisCommand.ttl(keys.room(roomId));
+    const token = signToken({ roomId, userId: requestId, role: "member" }, ttl);
+    return res.json({ status, token });
+  }
+
+  res.json({ status });
 });
 
 roomsRouter.post(

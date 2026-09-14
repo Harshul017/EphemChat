@@ -110,6 +110,34 @@ export async function approveRequest(roomId: string, requestId: string): Promise
   return { userId, name };
 }
 
+export interface PendingRequest {
+  requestId: string;
+  name: string;
+}
+
+export async function getPendingRequests(roomId: string): Promise<PendingRequest[]> {
+  const requestIds = await redisCommand.smembers(keys.requests(roomId));
+  const results: PendingRequest[] = [];
+
+  for (const requestId of requestIds) {
+    const name = await redisCommand.hget(`${keys.requests(roomId)}:${requestId}`, "name");
+    if (name) results.push({ requestId, name });
+  }
+
+  return results;
+}
+
+export async function getRequestStatus(
+  roomId: string,
+  requestId: string
+): Promise<"pending" | "approved" | "unknown"> {
+  const alreadyMember = await isMember(roomId, requestId);
+  if (alreadyMember) return "approved";
+
+  const stillPending = await redisCommand.sismember(keys.requests(roomId), requestId);
+  return stillPending === 1 ? "pending" : "unknown";
+}
+
 export interface StoredMessage {
   userId: string;
   name: string;

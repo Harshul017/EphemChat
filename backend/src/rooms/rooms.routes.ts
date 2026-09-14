@@ -8,11 +8,15 @@ import {
   getMessages,
   getPendingRequests,
   getRequestStatus,
+  getRoomMembers,
+  removeMember,
 } from "./rooms.service";
+
 import { signToken } from "../auth/token";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { redisCommand } from "../redis/client";
 import { keys } from "../redis/keys";
+import { publishToRoom } from "../ws/pubsub";
 
 export const roomsRouter = Router();
 
@@ -30,6 +34,11 @@ const roomParamsSchema = z.object({
 const approveParamsSchema = z.object({
   roomId: z.string(),
   requestId: z.string(),
+});
+
+const memberParamsSchema = z.object({
+  roomId: z.string(),
+  userId: z.string(),
 });
 
 const joinRequestSchema = z.object({ name: z.string().min(1).max(40) });
@@ -118,5 +127,22 @@ roomsRouter.post(
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
     }
+  }
+);
+
+roomsRouter.get("/rooms/:roomId/members", requireAuth(), async (req: AuthedRequest, res) => {
+  const { roomId } = roomParamsSchema.parse(req.params);
+  const members = await getRoomMembers(roomId);
+  res.json(members);
+});
+
+roomsRouter.delete(
+  "/rooms/:roomId/members/:userId",
+  requireAuth("admin"),
+  async (req: AuthedRequest, res) => {
+    const { roomId, userId } = memberParamsSchema.parse(req.params);
+    await removeMember(roomId, userId);
+    publishToRoom(roomId, { type: "member_removed", userId });
+    res.json({ ok: true });
   }
 );

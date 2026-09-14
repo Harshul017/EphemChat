@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getMessages } from "../lib/api";
+import { decodeToken } from "../lib/jwt";
 import type { StoredMessage, WsEvent } from "../types";
 
 interface ChatMessageItem extends StoredMessage {
@@ -10,6 +11,7 @@ interface UseChatSocketResult {
   messages: ChatMessageItem[];
   warning: number | null;
   expired: boolean;
+  removed: boolean;
   connected: boolean;
   sendMessage: (text: string) => void;
 }
@@ -21,6 +23,7 @@ export function useChatSocket(
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [warning, setWarning] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
+  const [removed, setRemoved] = useState(false);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -28,14 +31,12 @@ export function useChatSocket(
     if (!roomId || !token) return;
     let cancelled = false;
 
-    // Fetch history and open the socket concurrently, not sequentially —
-    // this keeps the connection snappy instead of waiting on REST first.
+    const ownUserId = decodeToken(token)?.userId;
+
     getMessages(roomId, token)
       .then((history) => {
         if (cancelled) return;
         const items = history.map((m) => ({ ...m, id: `${m.userId}-${m.ts}` }));
-        // Prepend history rather than overwrite, in case a live message
-        // already arrived over the socket before this fetch resolved.
         setMessages((prev) => [...items, ...prev]);
       })
       .catch((err) => {
@@ -66,7 +67,8 @@ export function useChatSocket(
         setWarning(data.secondsLeft);
       } else if (data.type === "room_expired") {
         setExpired(true);
-        ws.close();
+      } else if (data.type === "member_removed" && data.userId === ownUserId) {
+        setRemoved(true);
       }
     };
 
@@ -81,5 +83,5 @@ export function useChatSocket(
     wsRef.current.send(JSON.stringify({ type: "message", text }));
   }
 
-  return { messages, warning, expired, sendMessage, connected };
+  return { messages, warning, expired, removed, sendMessage, connected };
 }

@@ -4,6 +4,7 @@ import { getRoomInfo, requestToJoin, getRequestStatus } from "../lib/api";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { decodeToken } from "../lib/jwt";
 import { ApprovalPanel } from "../components/ApprovalPanel";
+import { MemberList } from "../components/MemberList";
 
 function ShareLink({ roomId }: { roomId: string }) {
   const [copied, setCopied] = useState(false);
@@ -62,15 +63,14 @@ export default function ChatRoom() {
           setToken(result.token);
         }
       } catch {
-        // Room may have expired while waiting — the roomName fetch
-        // failure will already surface that elsewhere.
+        // Room may have expired while waiting — handled elsewhere.
       }
     }, 3000);
 
     return () => clearInterval(interval);
   }, [roomId, pendingRequestId, token]);
 
-  const { messages, warning, expired, sendMessage, connected } = useChatSocket(roomId, token);
+  const { messages, warning, expired, removed, sendMessage, connected } = useChatSocket(roomId, token);
 
   async function handleRequestJoin() {
     if (!roomId || !name.trim()) return;
@@ -93,6 +93,15 @@ export default function ChatRoom() {
 
   if (!roomName) {
     return <p style={{ padding: 40 }}>LOADING ROOM...</p>;
+  }
+
+  if (removed) {
+    return (
+      <div style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}>
+        <h2 style={{ textAlign: "center", color: "var(--ghost-red)" }}>EATEN BY A GHOST</h2>
+        <p style={{ textAlign: "center" }}>You were removed from this room by the admin.</p>
+      </div>
+    );
   }
 
   if (expired) {
@@ -161,6 +170,7 @@ export default function ChatRoom() {
       )}
 
       {isAdmin && roomId && token && <ApprovalPanel roomId={roomId} adminToken={token} />}
+      {isAdmin && roomId && token && <MemberList roomId={roomId} adminToken={token} />}
 
       <div
         className="maze-panel"

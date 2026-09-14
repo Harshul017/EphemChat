@@ -30,4 +30,5 @@ export type WsEvent =
   | { type: "user_left"; userId: string }
   | { type: "message"; userId: string; name: string; text: string; ts: number }
   | { type: "room_expiring_soon"; secondsLeft: number }
-  | { type: "room_expired" };
+  | { type: "room_expired" }
+  | { type: "member_removed"; userId: string };

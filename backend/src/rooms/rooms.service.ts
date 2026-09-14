@@ -168,3 +168,29 @@ export async function getMessages(roomId: string): Promise<StoredMessage[]> {
   const raw = await redisCommand.lrange(keys.messages(roomId), 0, -1);
   return raw.map((entry) => JSON.parse(entry) as StoredMessage);
 }
+
+export interface RoomMember {
+  userId: string;
+  name: string;
+  isAdmin: boolean;
+}
+
+export async function getRoomMembers(roomId: string): Promise<RoomMember[]> {
+  const memberIds = await redisCommand.smembers(keys.members(roomId));
+  const adminId = await redisCommand.hget(keys.room(roomId), "adminId");
+
+  const result: RoomMember[] = [];
+  for (const userId of memberIds) {
+    const name = await redisCommand.hget(keys.member(roomId, userId), "name");
+    if (name) result.push({ userId, name, isAdmin: userId === adminId });
+  }
+
+  return result;
+}
+
+export async function removeMember(roomId: string, userId: string): Promise<void> {
+  const tx = redisCommand.multi();
+  tx.srem(keys.members(roomId), userId);
+  tx.del(keys.member(roomId, userId));
+  await tx.exec();
+}

@@ -86,3 +86,24 @@ export async function getMessages(roomId: string, token: string): Promise<Stored
   });
   return handleResponse<StoredMessage[]>(res);
 }
+
+export interface RoomMember {
+  userId: string;
+  name: string;
+  isAdmin: boolean;
+}
+
+export async function getRoomMembers(roomId: string, token: string): Promise<RoomMember[]> {
+  const res = await fetch(`${BASE_URL}/rooms/${roomId}/members`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleResponse<RoomMember[]>(res);
+}
+
+export async function removeMember(roomId: string, userId: string, adminToken: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/rooms/${roomId}/members/${userId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  await handleResponse<{ ok: boolean }>(res);
+}

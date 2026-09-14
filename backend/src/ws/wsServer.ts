@@ -22,20 +22,35 @@ function deliverToLocalSockets(roomId: string, event: unknown) {
   const sockets = rooms.get(roomId);
   if (!sockets) return;
 
-  const isRoomExpired =
-    typeof event === "object" && event !== null && "type" in event && event.type === "room_expired";
+  const type = (event as { type?: string } | null)?.type;
+  const data = JSON.stringify(event);
 
-  if (isRoomExpired) {
+  if (type === "room_expired") {
+    // Send the event FIRST so the frontend's onmessage handler actually
+    // fires before the connection drops — closing without sending first
+    // means the client never learns why it was disconnected.
     for (const client of sockets) {
+      if (client.readyState === WebSocket.OPEN) client.send(data);
       client.close(4410, "Room expired");
     }
     rooms.delete(roomId);
     return;
   }
 
-  // room_expiring_soon falls through here and gets sent as a normal
-  // message — the frontend decides what to do with it (show a banner).
-  const data = JSON.stringify(event);
+  if (type === "member_removed") {
+    const removedUserId = (event as { userId?: string }).userId;
+    for (const client of sockets) {
+      if (client.readyState === WebSocket.OPEN) client.send(data);
+      if (client.userId === removedUserId) {
+        client.close(4403, "Removed by admin");
+      }
+    }
+    return;
+  }
+
+  // Every other event type (message, user_joined, user_left,
+  // room_expiring_soon) falls through here and is just delivered as-is —
+  // the frontend decides what to do with it.
   for (const client of sockets) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(data);

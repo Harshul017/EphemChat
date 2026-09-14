@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
-import { createRoom, getRoomInfo, requestToJoin, approveRequest } from "./rooms.service";
+import { createRoom, getRoomInfo, requestToJoin, approveRequest, getMessages } from "./rooms.service";
 import { signToken } from "../auth/token";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { redisCommand } from "../redis/client";
 import { keys } from "../redis/keys";
+
 
 export const roomsRouter = Router();
 
@@ -37,6 +38,12 @@ roomsRouter.post("/rooms", async (req, res) => {
   const token = signToken({ roomId, userId: adminId, role: "admin" }, ttlSeconds);
 
   res.status(201).json({ roomId, token });
+});
+
+roomsRouter.get("/rooms/:roomId/messages", requireAuth(), async (req: AuthedRequest, res) => {
+  const { roomId } = roomParamsSchema.parse(req.params);
+  const messages = await getMessages(roomId);
+  res.json(messages);
 });
 
 roomsRouter.get("/rooms/:roomId", async (req, res) => {

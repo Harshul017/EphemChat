@@ -102,3 +102,34 @@ export async function approveRequest(roomId: string, requestId: string): Promise
 
   return { userId, name };
 }
+
+export interface StoredMessage {
+  userId: string;
+  name: string;
+  text: string;
+  ts: number;
+}
+
+export async function saveMessage(
+  roomId: string,
+  userId: string,
+  name: string,
+  text: string
+): Promise<void> {
+  const messagesKey = keys.messages(roomId);
+  const ttl = await redisCommand.ttl(keys.room(roomId));
+  if (ttl <= 0) throw new Error("Room does not exist or has expired");
+
+  const entry: StoredMessage = { userId, name, text, ts: Date.now() };
+
+  const tx = redisCommand.multi();
+  tx.rpush(messagesKey, JSON.stringify(entry));
+  tx.ltrim(messagesKey, -500, -1); // cap history so a busy room doesn't grow unbounded
+  tx.expire(messagesKey, ttl); // refreshed on every message, never a fixed one-time TTL
+  await tx.exec();
+}
+
+export async function getMessages(roomId: string): Promise<StoredMessage[]> {
+  const raw = await redisCommand.lrange(keys.messages(roomId), 0, -1);
+  return raw.map((entry) => JSON.parse(entry) as StoredMessage);
+}

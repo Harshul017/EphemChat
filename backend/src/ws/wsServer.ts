@@ -4,6 +4,7 @@ import { verifyToken } from "../auth/token";
 import { isMember, saveMessage } from "../rooms/rooms.service";
 import { redisCommand } from "../redis/client";
 import { keys } from "../redis/keys";
+import { publishToRoom, subscribeToRoomEvents } from "./pubsub";
 
 interface AuthedSocket extends WebSocket {
   roomId: string;
@@ -12,16 +13,29 @@ interface AuthedSocket extends WebSocket {
 }
 
 // Tracks which sockets on THIS instance belong to which room.
-// This is intentionally local-only — cross-instance broadcast is
-// added in the next step via Redis pub/sub, not by sharing this map.
+// Delivery to these sockets now happens ONLY via the pub/sub
+// subscription below — never directly from an event handler —
+// so one instance or ten behave identically.
 const rooms = new Map<string, Set<AuthedSocket>>();
+
+function deliverToLocalSockets(roomId: string, event: unknown) {
+  const sockets = rooms.get(roomId);
+  if (!sockets) return;
+  const data = JSON.stringify(event);
+  for (const client of sockets) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  }
+}
+
+// Wired once per process, independent of how many sockets connect.
+subscribeToRoomEvents(deliverToLocalSockets);
 
 export function setupWebSocketServer(httpServer: HttpServer) {
   const wss = new WebSocketServer({ noServer: true });
 
   // Auth happens here, BEFORE the connection is ever upgraded.
-  // This is the fix for the original repo's biggest hole: it upgraded
-  // first and never checked a token at all.
   httpServer.on("upgrade", async (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? "", "http://localhost");
     const token = url.searchParams.get("token");
@@ -41,8 +55,6 @@ export function setupWebSocketServer(httpServer: HttpServer) {
       return;
     }
 
-    // Token proves identity. Redis proves current standing — catches a
-    // member removed after their token was issued but before it expired.
     const stillMember = await isMember(payload.roomId, payload.userId);
     if (!stillMember) {
       socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -65,26 +77,25 @@ export function setupWebSocketServer(httpServer: HttpServer) {
     if (!rooms.has(ws.roomId)) rooms.set(ws.roomId, new Set());
     rooms.get(ws.roomId)!.add(ws);
 
-    broadcastToRoom(ws.roomId, { type: "user_joined", userId: ws.userId, name: ws.name });
+    publishToRoom(ws.roomId, { type: "user_joined", userId: ws.userId, name: ws.name });
 
     ws.on("message", async (raw) => {
       let parsed: { type?: string; text?: string };
       try {
         parsed = JSON.parse(raw.toString());
       } catch {
-        return; // ignore malformed frames, never crash the connection over bad input
+        return;
       }
 
       if (parsed.type === "message" && typeof parsed.text === "string" && parsed.text.trim()) {
         try {
           await saveMessage(ws.roomId, ws.userId, ws.name, parsed.text);
         } catch {
-          // Room's TTL hit zero mid-conversation.
           ws.close(4410, "Room expired");
           return;
         }
 
-        broadcastToRoom(ws.roomId, {
+        publishToRoom(ws.roomId, {
           type: "message",
           userId: ws.userId,
           name: ws.name,
@@ -97,18 +108,7 @@ export function setupWebSocketServer(httpServer: HttpServer) {
     ws.on("close", () => {
       rooms.get(ws.roomId)?.delete(ws);
       if (rooms.get(ws.roomId)?.size === 0) rooms.delete(ws.roomId);
-      broadcastToRoom(ws.roomId, { type: "user_left", userId: ws.userId });
+      publishToRoom(ws.roomId, { type: "user_left", userId: ws.userId });
     });
   });
-}
-
-function broadcastToRoom(roomId: string, event: unknown) {
-  const sockets = rooms.get(roomId);
-  if (!sockets) return;
-  const data = JSON.stringify(event);
-  for (const client of sockets) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(data);
-    }
-  }
 }

@@ -4,4 +4,5 @@ export const keys = {
   requests: (roomId: string) => `room:${roomId}:requests`,
   member: (roomId: string, userId: string) => `room:${roomId}:member:${userId}`,
   messages: (roomId: string) => `room:${roomId}:messages`,
+  warning: (roomId: string, leadSeconds: number) => `room:${roomId}:warning:${leadSeconds}`,
 };

@@ -21,6 +21,20 @@ const rooms = new Map<string, Set<AuthedSocket>>();
 function deliverToLocalSockets(roomId: string, event: unknown) {
   const sockets = rooms.get(roomId);
   if (!sockets) return;
+
+  const isRoomExpired =
+    typeof event === "object" && event !== null && "type" in event && event.type === "room_expired";
+
+  if (isRoomExpired) {
+    for (const client of sockets) {
+      client.close(4410, "Room expired");
+    }
+    rooms.delete(roomId);
+    return;
+  }
+
+  // room_expiring_soon falls through here and gets sent as a normal
+  // message — the frontend decides what to do with it (show a banner).
   const data = JSON.stringify(event);
   for (const client of sockets) {
     if (client.readyState === WebSocket.OPEN) {

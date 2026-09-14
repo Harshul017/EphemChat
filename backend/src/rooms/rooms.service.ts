@@ -10,7 +10,8 @@ export interface CreateRoomResult {
 export async function createRoom(
   roomName: string,
   adminName: string,
-  ttlSeconds: number
+  ttlSeconds: number,
+  warningLeadSeconds?: number
 ): Promise<CreateRoomResult> {
   const roomId = randomUUID();
   const adminId = randomUUID();
@@ -27,6 +28,12 @@ export async function createRoom(
   tx.expire(membersKey, ttlSeconds);
   tx.hset(adminMemberKey, { name: adminName, joinedAt: now });
   tx.expire(adminMemberKey, ttlSeconds);
+
+  if (warningLeadSeconds && warningLeadSeconds > 0 && warningLeadSeconds < ttlSeconds) {
+    const warningKey = keys.warning(roomId, warningLeadSeconds);
+    tx.set(warningKey, "1");
+    tx.expire(warningKey, ttlSeconds - warningLeadSeconds);
+  }
 
   const results = await tx.exec();
   if (!results) throw new Error("Redis transaction failed to execute");

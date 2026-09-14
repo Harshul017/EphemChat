@@ -6,13 +6,13 @@ import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { redisCommand } from "../redis/client";
 import { keys } from "../redis/keys";
 
-
 export const roomsRouter = Router();
 
 const createRoomSchema = z.object({
   roomName: z.string().min(1).max(80),
   adminName: z.string().min(1).max(40),
   ttlSeconds: z.number().int().min(60).max(7200), // 1 min to 2 hours
+  warningLeadSeconds: z.number().int().min(5).max(600).optional(),
 });
 
 const roomParamsSchema = z.object({
@@ -32,8 +32,8 @@ roomsRouter.post("/rooms", async (req, res) => {
     return res.status(400).json({ error: parsed.error.format() });
   }
 
-  const { roomName, adminName, ttlSeconds } = parsed.data;
-  const { roomId, adminId } = await createRoom(roomName, adminName, ttlSeconds);
+  const { roomName, adminName, ttlSeconds, warningLeadSeconds } = parsed.data;
+  const { roomId, adminId } = await createRoom(roomName, adminName, ttlSeconds, warningLeadSeconds);
 
   const token = signToken({ roomId, userId: adminId, role: "admin" }, ttlSeconds);
 
